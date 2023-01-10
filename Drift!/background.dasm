@@ -1,0 +1,565 @@
+;------------------------------------------------
+;
+; Drift! 
+; by Connor Browder
+;
+;------------------------------------------------
+                processor 6502
+
+                include "vcs.h"
+
+                include "macro.h"
+
+
+;------------------------------------------------------------------------------
+
+HMM_LEFT = #%11100000
+HMM_RIGHT = #%00100000
+BIRD_HEIGHT = #6
+SKY_HEIGHT = #81
+GAME_MODE_START = #0
+GAME_MODE_GAME_OVER = #0
+GAME_MODE_PLAYING = #1
+;------------------------------------------------
+; RAM
+;------------------------------------------------
+    SEG.U   variables
+    ORG     $80
+	
+missile1y	.byte
+frame		.byte
+gameMode	.byte
+; player stuff
+sprite0gfx	ds 2
+sprite1gfx	ds 2
+p0gfx		.byte
+p0color		.byte
+p0y			.byte
+
+p1gfx		.byte
+p1color		.byte
+p1y			.byte
+
+gfx0Index	.byte
+m1			.byte
+
+halfCount	.byte
+color	.byte
+
+temp		.byte
+temp16L		.byte
+temp16H		.byte
+note1		.byte
+note2		.byte
+vol1		.byte
+vol2		.byte
+sound1		.byte
+sound2		.byte
+beat		.byte
+tempoCount	.byte
+measure		.byte
+atten		.byte
+
+
+
+
+
+
+;------------------------------------------------
+; Start of ROM
+;------------------------------------------------
+	SEG   Bank0
+	ORG   $F000       	; 4k ROM start point
+
+	include song.h
+	include songplay.h
+	
+Start 
+	CLEAN_START			; Clear RAM and Registers
+	lda		#$FF
+	sta		AUDV0
+	sta		AUDV1
+	
+;------------------------------------------------
+; INITIALIZE GAME
+;------------------------------------------------
+	   			
+				
+
+
+;CTRLPF_shadow = $80
+
+                lda #%00000001
+				;lda #%00000000
+
+				sta CTRLPF
+				
+			    ;sta CTRLPF_shadow          ; init our shadow register as required
+
+			    ;lda CTRLPF_shadow
+
+			    ;sta CTRLPF                 ; copy shadow register to TIA register
+				
+				lda #$02
+				sta COLUBK
+				
+				lda		#<BirdGfx2
+				sta		sprite0gfx
+				sta		sprite1gfx
+				lda		#>BirdGfx2
+				sta		sprite0gfx+1
+				sta		sprite1gfx+1
+
+				lda		#$00
+				sta		PF0
+				sta		PF1
+				sta		PF2
+				
+	   			lda		#10	
+				sta		p0y	
+	   			lda		#80
+				sta		p1y
+				
+				lda		#%00000101 ; double
+				sta		NUSIZ0
+				sta		NUSIZ1
+				
+                lda #$C8
+
+                sta COLUPF             ; set the playfield color
+				lda #0
+				sta halfCount
+				lda #$30
+				sta color
+
+       ;------------------------------------------------
+
+
+
+
+StartOfFrame
+   ; Start of new frame
+
+   ; Start of vertical blank processing
+                lda #0
+
+                sta VBLANK
+
+
+
+                lda #2
+
+                sta VSYNC
+
+
+
+                sta WSYNC
+
+                sta WSYNC
+
+                sta WSYNC               ; 3 scanlines of VSYNC signal
+
+				lda  	#43   	; set up timer for end of vblank
+				sta  	TIM64T
+
+                lda #0
+
+                sta VSYNC
+				
+				
+; ===================
+; MISSILE RESET 
+; ===================
+	; increment the missile counter
+	; Check the missile countdown counter
+
+	lda		missile1y
+	bne		.updateMissile		; if the missile was at 0, reset it.
+	lda		p0y					; "enemy" bird y position
+	sbc		#BIRD_HEIGHT		; minus the height to
+	sta		missile1y			; start the missile at the bottom of the second bird
+	lda		#0
+	sta		RESMP0				; release the missile from the P1 horizontal location
+	jmp		.endMissile
+.updateMissile
+	dec		missile1y			; move the missile down the screen
+	; check if we're past the bottom of the screen!
+	lda		missile1y
+	bne		.endMissile
+	lda		#%00000010
+	sta		RESMP0		; reset missile 1 to player 1
+.endMissile
+				
+
+; ------------------
+; Check Game Mode
+; ------------------
+CheckGameMode
+	; check which game mode we are in
+	;lda		gameMode
+	;cmp		GAME_MODE_GAME_OVER
+	;bne		EndCheckGameMode
+	; if we're not playing, we need to allow the game to be started, 
+	; which we'll do with the console reset switch
+CheckResetSwitch
+	lda		#%00000001		; bit 0 = reset switch
+	bit		SWCHB
+	bne		.endCheckResetSwitch
+.resetGame
+	; reset everything!
+	lda		#10	
+	sta		p0y
+	lda #0
+	sta		HMP0	; no movement
+	sta		HMP1
+	lda		#GAME_MODE_PLAYING
+	sta		gameMode	
+.endCheckResetSwitch
+	;jmp		VerticalBlank
+EndCheckGameMode
+
+                
+	;lda #0
+	;sta		HMP0	; no movement
+	;sta		HMP1
+; ===================
+; CHECK PLAYER INPUT
+; ===================
+	lda	CXP0FB
+	and #%10000000
+	beq .test
+	lda	#%00000000	; for the missile
+	sta	HMP0
+.test
+				
+	; delay input detection
+	inc		frame
+	lda		frame
+	and		#4
+	cmp		#4
+	beq		.continue
+	jmp		EndInput
+.continue
+	lda		#0
+	sta		frame
+CheckJoy0Up
+	lda		#%00100000
+	bit		SWCHA
+	bne		.endCheckJoy0Up
+	
+	
+	lda		p0y
+	cmp		#180
+	bcs		.endCheckJoy0Up
+	lda	CXP0FB
+	and #%10000000
+	bne .isCollisionUp
+	inc		p0y
+	inc		p0y
+	inc		p0y
+.isCollisionUp
+	inc		p0y
+	;jmp		EndInput
+.endCheckJoy0Up
+CheckJoy0Down
+	lda		#%00010000
+	bit		SWCHA
+	bne		.endCheckJoy0Down
+	
+
+	
+	lda		p0y
+	cmp		#4
+	bcc		.endCheckJoy0Down
+	lda	CXP0FB
+	and #%10000000
+	bne .isCollisionDown
+	dec		p0y
+	dec		p0y
+	dec		p0y
+.isCollisionDown
+	dec		p0y
+	;jmp		EndInput
+.endCheckJoy0Down
+CheckJoy0Right
+	lda		#%01000000
+	bit		SWCHA
+	bne		.endCheckJoy0Right
+	
+	
+	lda	CXP0FB
+	and #%10000000
+	beq .isCollisionRight
+	lda	#%00010000
+	sta		HMP0
+.isCollisionRight
+.endCheckJoy0Right
+CheckJoy0Left
+    lda 	#%10000000
+    bit 	SWCHA
+	bne		EndInput
+	
+	
+	lda	#%11110000
+	sta	HMP0
+	
+	lda	CXP0FB
+	and #%10000000
+	bne .isCollisionLeft
+	lda	#%11110000
+	sta		HMP0
+.isCollisionLeft
+EndInput
+
+; ===================
+; CHECKPOINTS
+; ===================
+
+CheckPoint
+	lda halfCount
+	cmp #1
+	bcs .halfway
+.something
+	lda #$80
+	sta color
+.halfway
+	lda p0y
+	cmp #80
+	bne .nothalfway
+	lda #$1E
+	sta COLUPF
+	inc halfCount
+.nothalfway
+.halfway2
+	lda p0y
+	cmp #81
+	bne .nothalfway2
+	lda #$9E
+	sta COLUPF
+	inc halfCount
+.nothalfway2
+.halfway3
+	lda p0y
+	cmp #82
+	bne .nothalfway3
+	lda #$5E
+	sta COLUPF
+	inc halfCount
+.nothalfway3
+.halfway4
+	lda p0y
+	cmp #83
+	bne .nothalfway4
+	lda #$0E
+	sta COLUPF
+	inc halfCount
+.nothalfway4
+.halfway5
+	lda p0y
+	cmp #84
+	bne .nothalfway5
+	lda #$CE
+	sta COLUPF
+	inc halfCount
+.nothalfway5
+
+
+       ;------------------------------------------------
+
+       ; 37 scanlines of vertical blank. . .
+
+            
+	  ; ldx #0
+	  jsr 	songPlayer
+
+VerticalBlank   
+	lda	INTIM
+	BNE	VerticalBlank 
+	sta WSYNC
+	sta	HMOVE
+	sta		CXCLR
+    ;inx
+	;cpx #37 ;37 or 20
+	bne VerticalBlank
+
+
+
+       ;------------------------------------------------
+
+       ; Do 192 scanlines of color-changing (our picture)
+
+	   ;lda #%11111111
+	   ;sta PF0
+	   ;sta PF1
+	   ;sta PF2
+	  
+	   
+	   ;ldx #0
+;TLine
+	;sta WSYNC
+	;inx
+	;cpx #8
+	;bne TLine
+
+
+	
+
+	ldx #0  ; line #
+	lda #%00010000
+	sta PF0
+
+ALine	
+
+	lda	p0gfx		; load what we stored previously
+	sta	GRP0
+	lda	p0color		; same for the color
+	sta	COLUP0
+	lda		m1
+	sta		ENAM0
+	
+	;lda	p1gfx		; load what we stored previously
+	;sta	GRP1
+	;lda	p1color		; same for the color
+	;sta	COLUP1
+
+	
+	cpx		p0y	
+	bne		.loadSprite0
+	lda		#5
+	sta	gfx0Index
+.loadSprite0
+	lda	gfx0Index
+	cmp		#$FF
+	beq		.noSprite0
+	tay
+	lda	 	(sprite0gfx),y
+	sta		p0gfx
+	lda		BirdColors,y
+	sta		p0color
+	dec	gfx0Index
+	jmp		.endSprite0	
+.noSprite0
+	lda		#0
+	sta		p0gfx
+.endSprite0
+	; Set up the missile for the next frame
+	lda		#0
+	cpx		missile1y			
+	bne		.noMissile1
+	lda		#%00000010
+.noMissile1
+	sta		m1
+
+	
+	lda red2_STRIP_1,x	; PF1 left
+
+	sta PF1
+
+	lda red2_STRIP_2,x	; PF2 left
+
+	sta PF2
+	
+	;nop
+	;nop
+	;nop
+	;nop
+
+	sta WSYNC
+	inx
+
+	cpx #196
+
+	bne ALine
+	
+	
+	   lda #%11111111
+	   sta PF0
+	   sta PF1
+	   sta PF2
+	  
+	   
+	   ldx #0
+BLine sta WSYNC
+	inx
+	cpx #8
+	bne BLine
+
+
+
+       ;------------------------------------------------
+
+
+
+ 
+
+                lda #%01000010
+
+                sta VBLANK          ; end of screen - enter blanking
+
+
+
+   ; 30 scanlines of overscan. . .
+
+
+
+                ldx #0
+
+Overscan        sta WSYNC
+
+                inx
+
+                cpx #30
+
+                bne Overscan
+
+
+
+                jmp StartOfFrame
+
+				include "r.asm"
+
+
+
+;------------------------------------------------------------------------------
+
+;------------------------------------------------
+; ROM Tables
+;------------------------------------------------
+	;***** ROM tables go here
+	
+BirdGfx1
+	.byte	%00010000
+	.byte	%00010000
+	.byte	%00010000
+	.byte	%00010000
+	.byte	%00010000
+	.byte	%00010000
+BirdGfx2
+	.byte	%00100100
+	.byte	%01111110
+	.byte	%01111110
+	.byte	%01111110
+	.byte	%01111110
+	.byte	%00100100
+
+
+BirdColors
+	.byte	#$0E
+	.byte	#$98
+	.byte	#$98
+	.byte	#$98
+	.byte	#$98
+	.byte	#$0E
+	.byte	#$0E
+
+
+	
+;------------------------------------------------
+; Interrupt Vectors
+;------------------------------------------------
+	ORG    $FFFA
+	.word  Start         ; NMI
+	.word  Start         ; RESET
+	.word  Start         ; IRQ
+    
+	END
